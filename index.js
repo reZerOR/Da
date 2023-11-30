@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const app = express();
 const jwt = require('jsonwebtoken');
+const moment = require('moment');
 require('dotenv').config();
 const stripe = require('stripe')(process.env.STRIPE_SECRET_TOKEN)
 
@@ -32,6 +33,7 @@ async function run() {
     // COLLECTIONS
     const userCollection = client.db("dataDumpDB").collection("users");
     const paymentCollection = client.db("dataDumpDB").collection("payments");
+    const surveyCollection = client.db("dataDumpDB").collection("survey");
 
     // jwt api
     app.post('/jwt', async (req, res) => {
@@ -172,7 +174,164 @@ async function run() {
     })
 
 
+    // SURVEY RELATED API
 
+    app.get('/surveys/most-voted', async(req, res)=>{
+      const result = await surveyCollection.find({status: 'published'})
+      .project({title: 1, category:1, description: 1, vote: 1})
+      .sort({vote: -1})
+      .limit(6)
+      .toArray()
+      res.send(result)
+    })
+
+    app.get('/surveys/search', async(req, res)=> {
+      const {title, category, sort} = req.query
+      const filters ={status: 'published'}
+      if(title){
+        filters.title = {$regex: new RegExp(title, 'i')}
+      }
+      if(category){
+        filters.category = category
+      }
+      
+      let query = surveyCollection.find(filters)
+
+      if(sort === 'asc'){
+        query = query.sort({vote: 1})
+      }
+      if(sort === 'desc'){
+        query = query.sort({vote: -1})
+      }
+      
+      const searchResults = await query.toArray()
+      res.send(searchResults)
+    })
+
+    app.get('/surveys/:id', async(req, res)=>{
+      const id = req.params.id
+      const email = req.query.email;
+
+      const query = {_id: new ObjectId(id)}
+      const result = await surveyCollection.findOne(query)
+      let isUserVoted = false
+      if(result){
+        if(result.voted){
+          const isvoted = result.voted.find(user => user.email === email)
+          if(isvoted){
+            isUserVoted =true
+          }
+        }
+      }
+      res.send({isUserVoted, result})
+    })
+
+    // survey vote, ike , dislike , yesvote, novote 
+    app.put('/updateSurvey/:id', async(req, res)=>{
+      const id = req.params.id
+      const {email, votedIn, like, dislike, yesVoted, noVoted} = req.body
+      console.log(req.body)
+      const survey = await surveyCollection.findOne({_id: new ObjectId(id)})
+      let updatedQuery;
+      if(survey){
+        
+        if(survey.voted){
+          updatedQuery= {
+            $push: {voted: {email, votedIn}},
+            $inc: {like: like || 0, vote: 1, dislike: dislike || 0, yesVoted: yesVoted || 0, noVoted:noVoted || 0}
+          } 
+        }else{
+          updatedQuery={
+            $set: {voted: [{email, votedIn}]},
+            $inc: {like: like || 0, vote: 1, dislike: dislike || 0, yesVoted: yesVoted || 0, noVoted:noVoted || 0}
+          }
+        }
+        
+      }
+      const result = await surveyCollection.updateOne({_id: new ObjectId(id)}, updatedQuery)
+      res.send(result)
+
+
+    })
+
+    app.put('/surveyReportUpdate/:id', async(req, res)=>{
+      const id = req.params.id
+      const report = req.query.report
+      const survey = await surveyCollection.findOne({_id: new ObjectId(id)})
+      let updatedQuery 
+      if (survey) {
+        if(survey.reports){
+          updatedQuery = {
+            $push: {reports: report}
+          }
+        }else{
+          updatedQuery = {
+            $set: {reports: [report]}
+          }
+        }
+      }
+      const result = await surveyCollection.updateOne({_id: new ObjectId(id)}, updatedQuery)
+      res.send(result)
+    })
+
+    app.put('/surveyCommentUpdate/:id', async(req, res)=>{
+           const id = req.params.id
+      const comment = req.query.comment
+      const survey = await surveyCollection.findOne({_id: new ObjectId(id)})
+      let updatedQuery 
+      if (survey) {
+        if(survey.reports){
+          updatedQuery = {
+            $push: {comments: comment}
+          }
+        }else{
+          updatedQuery = {
+            $set: {comments: [comment]}
+          }
+        }
+      }
+      const result = await surveyCollection.updateOne({_id: new ObjectId(id)}, updatedQuery)
+      res.send(result)
+    })
+
+    app.post('/surveys', verifyToken, verifySurveyor, async(req, res)=>{
+      const survey = req.body
+      survey.timeStamp = moment().format('MMMM Do YYYY, h:mm:ss a')
+      const result = await surveyCollection.insertOne(survey)
+      res.send(result)
+    })
+
+
+  app.get('/surveys', verifyToken, verifySurveyor, async(req, res)=>{
+    const email = req.query.email
+    const result = await surveyCollection.find({surveyor_email: email}).toArray()
+    res.send(result)
+  })
+
+  app.get('/surveys/update/:id', verifyToken, verifySurveyor, async(req, res) => {
+    const id = req.params.id
+    const query = {_id: new ObjectId(id)}
+    const result = await surveyCollection.findOne(query) 
+    res.send(result)
+    console.log(result)
+  })
+  
+  app.put('/surveys/update/:id', verifyToken, verifySurveyor, async(req, res)=>{
+    const info = req.body
+    const id = req.params.id
+    const filter = {_id: new ObjectId(id)}
+    const updateDoc = {
+      $set: {
+        title: info.title,
+        category: info.category,
+        description: info.description,
+        question: info.question,
+        expiryDate: info.expiryDate
+      }
+    }
+    const result = await surveyCollection.updateOne(filter, updateDoc)
+    res.send(result)
+  })
     // payment intent
     app.post('/create-payment-intent', async(req, res)=>{
       const {price} = req.body
