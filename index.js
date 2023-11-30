@@ -302,18 +302,53 @@ async function run() {
     })
 
 
-  app.get('/surveys', verifyToken, verifySurveyor, async(req, res)=>{
+  app.get('/surveys', verifyToken, async(req, res)=>{
     const email = req.query.email
-    const result = await surveyCollection.find({surveyor_email: email}).toArray()
+     const status = req.query.status
+     let query = {}
+     if(status && email){
+      query = {
+        surveyor_email: email,
+        status: status,
+      }
+     }else if(email){
+      query = {
+        surveyor_email: email,
+      }
+     }else{
+      query = {
+        status: status,
+      }
+     }
+     console.log(status)
+    const result = await surveyCollection.find(query).toArray()
     res.send(result)
   })
 
   app.get('/surveys/update/:id', verifyToken, verifySurveyor, async(req, res) => {
     const id = req.params.id
+   
+ 
     const query = {_id: new ObjectId(id)}
     const result = await surveyCollection.findOne(query) 
     res.send(result)
     console.log(result)
+  })
+
+  app.get('/survey/manage', verifyToken, verifyAdmin, async(req, res)=>{
+    const result = await surveyCollection.find().toArray()
+    res.send(result)
+  })
+  app.put('/survey/manage/:id', verifyToken, verifyAdmin, async(req, res)=>{
+     const  id = req.params.id
+     const status = req.query.status
+     const filter = {_id: new ObjectId(id)}
+     const updatedDoc = {
+      $set: {
+        status: status
+      }
+     }
+     const result = await surveyCollection.updateOne(filter, updatedDoc)
   })
   
   app.put('/surveys/update/:id', verifyToken, verifySurveyor, async(req, res)=>{
@@ -363,7 +398,7 @@ async function run() {
 
 
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
